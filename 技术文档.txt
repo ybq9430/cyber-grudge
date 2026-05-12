@@ -1,0 +1,178 @@
+================================================================================
+                      赛博除怨局 (Cyber Grudge) — 技术文档
+================================================================================
+
+【技术栈】
+
+  Runtime:       Node.js
+  Framework:     Next.js 14 (App Router)
+  Language:      TypeScript
+  Styling:       Tailwind CSS 3
+  Animation:     GSAP 3 (GreenSock)
+  AI:            DeepSeek Chat API (可选)
+  Deployment:    Vercel / 任意支持 Next.js 的平台
+
+【项目结构】
+
+  cyber-grudge/
+  ├── app/
+  │   ├── layout.tsx              # 根布局，暗色 HTML，元数据
+  │   ├── page.tsx                # 主页面（所有状态管理中心）
+  │   ├── globals.css             # Tailwind + CSS 变量 + 弹幕/闪烁关键帧
+  │   └── api/
+  │       └── curse/
+  │           └── route.ts        # POST /api/curse 端点
+  ├── components/
+  │   ├── StatsHeader.tsx         # 标题 + 数字滚动计数器
+  │   ├── Marquee.tsx             # 水平滚动弹幕轨
+  │   ├── InputArea.tsx           # 左侧控制面板（输入+锁定+开关+Key）
+  │   ├── Doll.tsx                # SVG 小人 + GSAP 动画引擎
+  │   └── CurseBubble.tsx         # 诅咒气泡（GSAP 入场动画）
+  ├── package.json
+  ├── tsconfig.json
+  ├── tailwind.config.ts
+  ├── postcss.config.mjs
+  ├── next.config.js
+  └── .gitignore
+
+【架构设计】
+
+  状态管理 (page.tsx) — 所有状态集中于主页面，通过 props 向下传递：
+
+  ┌──────────────────────────────────────────────────────┐
+  │                    page.tsx                          │
+  │  eventText, isTargetLocked, deepMode,               │
+  │  apiKey, loading, curseText, totalHits              │
+  │                                                      │
+  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+  │  │InputArea │  │  Doll    │  │  CurseBubble     │   │
+  │  │(props↓)  │  │(props↓)  │  │  (props↓)        │   │
+  │  │(events↑) │  │(events↑) │  │  (auto-dismiss)  │   │
+  │  └──────────┘  └──────────┘  └──────────────────┘   │
+  └──────────────────────────────────────────────────────┘
+
+  数据流：
+    用户输入 → 锁定罪证 → 点击部位 → fetch /api/curse → 更新 curseText + totalHits
+    API Key 独立存储在 localStorage，每次修改同步写入
+
+【API 设计】
+
+  端点：POST /api/curse
+
+  请求：
+    Headers:
+      Content-Type: application/json
+      x-api-key: string (可选，deepMode=true 时必填)
+
+    Body:
+    {
+      "event": "小明跟老板打小报告说我上班摸鱼",
+      "part": "mouth",      // head | mouth | arm-left | arm-right | legs
+      "deepMode": true
+    }
+
+  响应 200:
+    {
+      "success": true,
+      "curse": "【深度除怨·AI判官】舌如长钉乱嚼舌，愿你顿顿吃泡面没有调料包！",
+      "newTotalHits": 12346
+    }
+
+  响应 401 (deepMode=true 但无 API Key):
+    {
+      "success": false,
+      "error": "缺少 API Key —— 请在左侧输入 DeepSeek API Key"
+    }
+
+  后端逻辑流程：
+    1. 解析 Body 和 x-api-key Header
+    2. 若 deepMode=true 且无 Key → 返回 401
+    3. 若 deepMode=true 且有 Key → 调用 DeepSeek API
+       - 成功 → 返回 AI 生成的咒语
+       - 失败 → 降级使用本地咒语池
+    4. 若 deepMode=false → 使用本地咒语池（600-1100ms 模拟延迟）
+
+  DeepSeek API 调用参数：
+    - URL: https://api.deepseek.com/chat/completions
+    - Model: deepseek-chat
+    - System Prompt: 赛博判官角色设定（中文）
+    - max_tokens: 100
+    - temperature: 0.9
+
+【SVG 结构与动画规范】
+
+  内联 SVG 严格分层，使用 <g id="..."> 包裹：
+
+  ┌─────────────────────────────────┐
+  │  #head (头部圆圈 + 眼睛)         │  ← 点击触发 rotation: 360
+  │  #mouth (嘴巴矩形 + 横线)        │  ← 点击触发 elastic.out 弹性放大
+  │  #arm-left (左上臂 + 手圆)       │  ← 点击触发 yoyo 抽搐
+  │  #arm-right (右上臂 + 手圆)      │  ← 点击触发 yoyo 抽搐
+  │  #legs (双腿 + 脚)              │  ← 点击触发 skewX 扭曲
+  │  (antenna)                       │  ← 装饰性天线
+  └─────────────────────────────────┘
+
+  playStrikeAnimation(partId) 执行顺序：
+    1. gsap.fromTo 全局 x 轴震动 (repeat: 7, yoyo)
+    2. querySelectorAll("[stroke]") 收集被点击部位的描边元素
+    3. 瞬间将 stroke 改为 #ff0000 (红色)
+    4. gsap.fromTo scale: 1 → 1.2
+    5. gsap.to scale → 1, ease: "elastic.out(1, 0.4)"
+    6. 动画完成回调中恢复原始 stroke 颜色
+
+  transformOrigin 校准（关键）：
+    - head:  "50% 34%"     (头部圆心附近)
+    - mouth: "center"      (嘴巴中心)
+    - arm-left:  "85% 42%" (左臂肩关节)
+    - arm-right: "15% 42%" (右臂肩关节)
+    - legs:  "50% 0%"      (腿部顶端/胯关节)
+
+【组件详解】
+
+  InputArea.tsx:
+    - 128-130px 最小高度 textarea，锁定后 readonly + 红边发光
+    - 锁定按钮：GSAP scale: 1 → 1.15 脉冲反馈
+    - 深度除怨开关：纯 CSS transition 滑块
+    - API Key 区域：GSAP height: 0 ↔ auto + opacity 动画
+    - 底部警告文字：CSS animate-pulse
+
+  Doll.tsx:
+    - 5 个 useRef 对应 5 个身体部位 <g> 元素
+    - isTargetLocked 控制 (1) 霓虹发光强度 (2) 光标样式 (3) 是否响应点击
+    - PART_CONFIG 字典：统一管理每个部位的 refKey/transformOrigin/动画类型
+    - 未锁定时底部显示"请先锁定罪证"提示
+
+  CurseBubble.tsx:
+    - 绝对定位在 SVG 小上方
+    - GSAP fromTo: opacity:0, scale:0.3, y:20 → opacity:1, scale:1, y:0
+    - ease: "back.out(1.7)" 产生弹跳效果
+    - 三角箭头指向下方
+
+  Marquee.tsx:
+    - CSS @keyframes marquee: translateX(0) → translateX(-50%)
+    - 内容重复一份（messages.concat(messages)）实现无缝循环
+    - setInterval 每 5 秒洗牌刷新消息列表
+
+  StatsHeader.tsx:
+    - requestAnimationFrame 驱动的数字滚动动画
+    - ease-out 缓动 (1 - (1-p)^3)
+    - tabular-nums 字体确保数字宽度一致
+
+【安全设计】
+
+  1. API Key 仅存储在浏览器 localStorage，key 名：cyber_grudge_api_key
+  2. API Key 通过 x-api-key Header 发送至本服务端，服务端转发至 DeepSeek
+  3. 前端对 Key 做 trim 处理
+  4. 输入框使用 type="password" 隐藏 Key 明文
+  5. 服务端不记录/不存储/不打印 Key
+  6. .gitignore 排除 .env.local 等敏感文件
+
+【扩展方向】
+
+  - 接入数据库持久化 totalHits（当前为内存变量，重启归零）
+  - WebSocket 实现真正的多人在线弹幕
+  - OAuth 登录 + 历史除怨记录
+  - 更多小人皮肤/主题
+  - 实际接入更多 LLM Provider（OpenAI, Anthropic 等）
+
+================================================================================
