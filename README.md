@@ -4,6 +4,8 @@
 
 赛博朋克风格的在线解压互动应用。输入你被暗算的"黑状"，锁定罪证，点击 SVG 小人扎针，获得 AI 生成（或本地）的讽刺诅咒作为精神补偿。
 
+<img width="1471" height="926" alt="a5dfb5c699d7860488891866168726b2" src="https://github.com/user-attachments/assets/d6589b4e-deb7-45f7-a941-1199ec7bfeeb" />
+
 ## 在线体验
 
 ```bash
